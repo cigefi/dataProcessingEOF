@@ -8,7 +8,7 @@
 % var2Read (Recommended)= Variable to be read (use 'ncdump' to check variable names)
 % yearZero (Optional) = Lower year of the data to be read
 % yearN (Optional) = Higher year of the data to be read
-function [] = dataProcessingEOF(dirName,var2Read,yearZero,yearN)
+function [eof_mat] = dataProcessingEOF(dirName,var2Read,yearZero,yearN)
     if nargin < 1
         error('dataProcessingEOF: dirName is a required input')
     end
@@ -29,6 +29,7 @@ function [] = dataProcessingEOF(dirName,var2Read,yearZero,yearN)
         yearZero = yearN;
         yearN = yearTemp;
     end
+    eof_mat = [];
     dirData = dir(dirName);  % Get the data for the current directory
     months = [31,28,31,30,31,30,31,31,30,31,30,31]; % Reference to the number of days per month
     monthsName = {'January','February','March','April','May','June','July','August','September','October','November','December'};
@@ -39,7 +40,7 @@ function [] = dataProcessingEOF(dirName,var2Read,yearZero,yearN)
     %newName = strcat('[CIGEFI] EOF ',num2str(yearZero),'-'+num2str(yearN)+'.nc');
     newName = strcat('[CIGEFI] EOF.nc');
     newFile = char(path.concat(newName));
-    fileConf = 0;
+    %fileConf = 0;
     
     for f = 3:length(dirData)
         fileT = path.concat(dirData(f).name);
@@ -57,12 +58,12 @@ function [] = dataProcessingEOF(dirName,var2Read,yearZero,yearN)
                     end
                 end
                 if(yearC > 0)
-                    if fileConf == 0
+                    if (length(eof_mat)) == 0
                         configure_netcdf(fileT,newFile,yearC,var2Read);
-                        fileConf = 1;
+                        %fileConf = 1;
                     end
                     % Subrutine to writte the data in new Netcdf file
-                    writeFile(fileT,var2Read,yearC,months,monthsName,newFile);
+                    eof_mat = writeFile(fileT,var2Read,yearC,months,monthsName,newFile,eof_mat);
                 end
             catch
                 continue;
@@ -71,13 +72,13 @@ function [] = dataProcessingEOF(dirName,var2Read,yearZero,yearN)
             if isequal(dirData(f).isdir,1)
                   newPath = char(path.concat(dirData(f).name));
                 if nargin < 2 % Validates if the var2Read param is received
-                    dataProcessingEOF(newPath);
+                    eof_mat = cat(1,eof_mat,dataProcessingEOF(newPath));
                 elseif nargin < 3 % Validates if the yearZero param is received
-                    dataProcessingEOF(newPath,var2Read);
+                   eof_mat = cat(1,eof_mat,dataProcessingEOF(newPath,var2Read));
                 elseif nargin < 4 % Validates if the yearN param is received
-                    dataProcessingEOF(newPath,var2Read,yearZero)
+                   eof_mat = cat(1,eof_mat,dataProcessingEOF(newPath,var2Read,yearZero));
                 else
-                    dataProcessingEOF(newPath,var2Read,yearZero,yearN)
+                    eof_mat = cat(1,eof_mat,dataProcessingEOF(newPath,var2Read,yearZero,yearN));
                 end
             end
         end
@@ -88,8 +89,8 @@ function configure_netcdf(fileT,newFile,yearC,var2Read)
     nc_create_empty(newFile,'netcdf4');
 
     % Adding file dimensions
-    nc_add_dimension(newFile,'latitude',0);
-    nc_add_dimension(newFile,'longitude',0);
+    nc_add_dimension(newFile,'lat',0);
+    nc_add_dimension(newFile,'lon',0);
 %     nc_add_dimension(newFile,'latitude',length(latDataSet));
 %     nc_add_dimension(newFile,'longitude',length(lonDataSet));
     nc_add_dimension(newFile,'time',0); % 0 means UNLIMITED dimension
@@ -113,23 +114,23 @@ function configure_netcdf(fileT,newFile,yearC,var2Read)
     % Adding file variables
     monthlyData.Name = var2Read;
     monthlyData.Datatype = 'single';
-    monthlyData.Dimension = {'time','latitude', 'longitude'};
+    monthlyData.Dimension = {'time','lat', 'lon'};
     nc_addvar(newFile,monthlyData);
 
     timeData.Name = 'time';
     timeData.Dimension = {'time'};
     nc_addvar(newFile,timeData);
 
-    latData.Name = 'latitude';
-    latData.Dimension = {'latitude'};
+    latData.Name = 'lat';
+    latData.Dimension = {'lat'};
     nc_addvar(newFile,latData);
 
-    lonData.Name = 'longitude';
-    lonData.Dimension = {'longitude'};
+    lonData.Name = 'lon';
+    lonData.Dimension = {'lon'};
     nc_addvar(newFile,lonData);
 end
 
-function [] = writeFile(fileT,var2Read,yearC,months,monthsName,newFile)
+function [eof_mat] = writeFile(fileT,var2Read,yearC,months,monthsName,newFile,eof_mat)
     maskDataSet = nc_varget('lsmask.oisst.v2.nc','lsmask');
     
     % Catching data from original file
@@ -146,11 +147,16 @@ function [] = writeFile(fileT,var2Read,yearC,months,monthsName,newFile)
 %         end
         k = 1;
         for i=1:1:length(maskDataSet(1,:,1))
+            l = 1;
             for j=1:1:length(maskDataSet(1,1,:))
-                if maskDataSet(1,i,j) == 1
-                    eof_mat(m,k,j) = timeDataSet(m,i,j);
-                    k = k + 1;
+                if maskDataSet(1,i,j) == 1 && isnan(timeDataSet(m,i,j)) == 0
+                    new_eof(m,k,l) = timeDataSet(m,i,j);%#ok<AGROW>
+                    %new_eof(m,i,j) = timeDataSet(m,i,j);%#ok<AGROW>
+                    l = l + 1;
                 end
+            end
+            if l > 1
+                k = k +1;
             end
         end
         %lat = [];
@@ -178,9 +184,12 @@ function [] = writeFile(fileT,var2Read,yearC,months,monthsName,newFile)
 % % %                 latDataSet(i) = [];
 % %             end
 %         end
-        nc_varput(newFile,var2Read,eof_mat(m,:,:));
+        % Writing the data into file
+        %nc_varput(newFile,var2Read,meanOut);
+        %nc_varput(newFile,var2Read,eof_mat);%(m,:,:));
         disp(strcat('Data saved:  ',monthsName(m),' - ',num2str(yearC),' - ',num2str(1)));
     end
+    eof_mat = cat(1,eof_mat,new_eof);
     % Writing the data into file
     %nc_varput(newFile,'latitude',lat);
     %nc_varput(newFile,var2Read,eof_mat);
